@@ -1,0 +1,136 @@
+// =================================== 1. LIBRARIES DAN DEFINISI ===================================
+
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <max6675.h>
+#include <Servo.h>  // Memasukkan pustaka Servo untuk kawalan kelajuan kipas
+
+// --- Inisialisasi LCD ---
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// --- Definisi Pin MAX6675 (SPI) ---
+const int thermoSO = 13;   // SO (Serial Output)
+const int thermoSCK = 12;  // SCK (Serial Clock)
+const int thermoCS = 11;   // CS (Chip Select)
+MAX6675 thermocouple(thermoSCK, thermoCS, thermoSO);
+
+// --- Definisi Pin Relay Module (Active HIGH) ---
+// Pin ini menghantar isyarat 5V dari Arduino untuk mengawal litar 12V
+const int GREEN_RELAY_IN  = 2;   // Pin D8 mengawal Relay Hijau
+const int YELLOW_RELAY_IN = 3;  // Pin D7 mengawal Relay Kuning
+const int RED_RELAY_IN    = 4;     // Pin D4 mengawal Relay Merah
+const int BUZZER_RELAY_IN = 5;  // Pin D3 mengawal Relay Buzzer
+
+// --- Definisi Pin Motor Servo ---
+Servo coolingFan;         // Objek Servo dinamakan coolingFan
+const int SERVO_PIN = 9;  // Menggunakan Pin D9 untuk isyarat Servo
+
+// --- Had Suhu (Dalam Celsius) ---
+const float LOW_TEMP_THRESHOLD = 40.0;
+const float HIGH_TEMP_THRESHOLD = 60.0;
+const float SAFE_TEMP_MIN = LOW_TEMP_THRESHOLD;
+const float SAFE_TEMP_MAX = HIGH_TEMP_THRESHOLD;
+
+// --- Pembolehubah ---
+float currentTemp = 0.0;
+
+
+// ======================================= 2. FUNGSI SETUP =======================================
+void setup() {
+  // Tetapkan pin kawalan Relay sebagai OUTPUT
+  pinMode(GREEN_RELAY_IN, OUTPUT);
+  pinMode(YELLOW_RELAY_IN, OUTPUT);
+  pinMode(RED_RELAY_IN, OUTPUT);
+  pinMode(BUZZER_RELAY_IN, OUTPUT);
+
+  // Padamkan semua Relay pada permulaan (Active HIGH: HIGH = ON)
+  digitalWrite(GREEN_RELAY_IN, LOW);
+  digitalWrite(YELLOW_RELAY_IN, LOW);
+  digitalWrite(RED_RELAY_IN, LOW);
+  digitalWrite(BUZZER_RELAY_IN, LOW);
+
+  // Attach Servo dan tetapkan kedudukan permulaan (OFF)
+  coolingFan.attach(SERVO_PIN);
+  coolingFan.write(0);  // Servo OFF / 0 Darjah
+
+  // --- Persediaan LCD ---
+  lcd.init();
+  lcd.backlight();
+  lcd.print("Sistem Auto Suhu");
+  lcd.setCursor(0, 1);
+  lcd.print("Servo Ready");
+  delay(2000);
+  lcd.clear();
+}
+
+
+// ========================================= 3. FUNGSI LOOP =========================================
+void loop() {
+
+  // Baca suhu dari MAX6675 dalam Celsius.
+  currentTemp = thermocouple.readCelsius();
+
+  // --- A. Logik Kawalan Relay dan Servo ---
+
+  // Logik ini menggunakan Active LOW: LOW = OFF, HIGH = ON
+
+  if (currentTemp < SAFE_TEMP_MIN) {
+    // KES 1: Suhu Bawah Had Selamat (< 30.0°C)
+
+    // OUTPUT RELAY: KUNING ON (Amaran), LAIN OFF
+    digitalWrite(YELLOW_RELAY_IN, HIGH);   // KUNING ON
+    digitalWrite(BUZZER_RELAY_IN, HGH);  // Buzzer ON
+    digitalWrite(GREEN_RELAY_IN, LOW);   // HIJAU OFF
+    digitalWrite(RED_RELAY_IN, LOW);     // MERAH OFF
+
+    // OUTPUT SERVO: Perlahan (45 darjah)
+    coolingFan.write(45);  // Servo pusing perlahan
+  }
+
+  else if (currentTemp > SAFE_TEMP_MAX) {
+    // KES 2: Suhu Melebihi Had Selamat (> 50.0°C)
+
+    // OUTPUT RELAY: MERAH ON, BUZZER ON, LAIN OFF
+    digitalWrite(RED_RELAY_IN, HIGH);      // MERAH ON
+    digitalWrite(BUZZER_RELAY_IN, HIGH);   // BUZZER ON
+    digitalWrite(GREEN_RELAY_IN, LOW);   // HIJAU OFF
+    digitalWrite(YELLOW_RELAY_IN, LOW);  // KUNING OFF
+
+    // OUTPUT SERVO: Perlahan (45 darjah)
+    coolingFan.write(45);  // Servo pusing perlahan (menjimatkan tenaga pada suhu ekstrem)
+  }
+
+  else {
+    // KES 3: Suhu Dalam Julat Selamat (20.0°C - 50.0°C)
+
+    // OUTPUT RELAY: HIJAU ON, LAIN OFF
+    digitalWrite(GREEN_RELAY_IN, HIGH);    // HIJAU ON
+    digitalWrite(RED_RELAY_IN, LOW);     // MERAH OFF
+    digitalWrite(YELLOW_RELAY_IN, LOW);  // KUNING OFF
+    digitalWrite(BUZZER_RELAY_IN, LOW);  // Buzzer OFF
+
+    // OUTPUT SERVO: Penuh (180 darjah)
+    coolingFan.write(180);  // Servo pusing laju
+  }
+
+  // --- B. Paparan Status pada LCD ---
+
+  // Baris 0: Paparan Suhu
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: ");
+  lcd.print(currentTemp, 1);
+  lcd.print((char)223);
+  lcd.print("C");
+  lcd.print("      ");
+
+  // Baris 1: Status Motor
+  lcd.setCursor(0, 1);
+  if (currentTemp < SAFE_TEMP_MIN || currentTemp > SAFE_TEMP_MAX) {
+    lcd.print("FAN: SLOW (45 deg)");
+  } else {
+    lcd.print("FAN: FULL (180 deg)");
+  }
+
+  // Jeda sebentar sebelum ulangan loop
+  delay(500);
+}
